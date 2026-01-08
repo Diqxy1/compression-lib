@@ -130,7 +130,7 @@ func startYourSyncServer(ppPath string) {
         `, ppPath, sizeKB, duration, getTypeName(dataType), contentHTML)
 	})
 
-	fmt.Println("🚀 Dashboard Pied Piper em http://localhost:8080")
+	fmt.Println("🚀 Dashboard YourSync em http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
 }
 
