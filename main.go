@@ -7,6 +7,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -35,7 +36,7 @@ func main() {
 
 	case "view":
 		if len(os.Args) < 3 {
-			fmt.Println("Erro: informe o arquivo .ys")
+			fmt.Println("Erro: informe o arquivo comprimido (pode ser .ys ou .txt")
 			return
 		}
 		startYourSyncServer(os.Args[2])
@@ -98,8 +99,22 @@ func execCompress(inputPath string) {
 	}
 
 	// 4. Salva o arquivo .ys
-	outputName := "resultado.ys"
-	os.WriteFile(outputName, compressedBuffer.Bytes(), 0644)
+	var outputName string
+
+	ext = strings.ToLower(filepath.Ext(inputPath))
+
+	if dataType == TYPE_IMG {
+		outputName = "resultado.ys"
+	} else {
+		baseName := strings.TrimSuffix(inputPath, ext)
+		outputName = baseName + "_comprimido.txt"
+	}
+
+	err = os.WriteFile(outputName, compressedBuffer.Bytes(), 0644)
+	if err != nil {
+		fmt.Println("Erro crítico ao salvar arquivo:", err)
+		return
+	}
 
 	fmt.Printf("Sucesso! Economia: %.2f%%\n", 100.0-(float64(compressedBuffer.Len())/float64(len(rawData))*100.0))
 }
