@@ -2,104 +2,104 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
-	"io"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"os"
+	"strings"
+)
+
+const (
+	TYPE_TEXT = 0
+	TYPE_IMG  = 1
 )
 
 func main() {
-	input := []byte("PIED PIPER COMPRESSION TEST - GO GO GO!")
-
-	// Simulando um arquivo usando um buffer em memória
-	var compressedData bytes.Buffer
-
-	// 1. Comprimindo
-	err := HuffmanCompress(input, &compressedData)
-	if err != nil {
-		fmt.Println("Erro na compressão: ", err)
-	}
-
-	fmt.Printf("Original: %d bytes\n", len(input))
-	fmt.Printf("Comprimindo (com cabeçalho): %d bytes\n", compressedData.Len())
-
-	// 2. Descomprimindo
-	//reader := bytes.NewReader(compressedData.Bytes())
-	restored, err := HuffmanDecompress(&compressedData)
-	if err != nil {
-		fmt.Println("Erro na descompressão: ", err)
+	if len(os.Args) < 2 {
+		fmt.Println("Your Sync CLI - Uso:")
+		fmt.Println("  run . compress <arquivo.png>  - Comprime uma imagem para .ys")
+		fmt.Println("  run . view <arquivo.ys>      - Abre o visualizador web")
 		return
 	}
 
-	fmt.Printf("Resultado: %s\n", string(restored))
+	command := os.Args[1]
+
+	switch command {
+	case "compress":
+		if len(os.Args) < 3 {
+			fmt.Println("Erro: informe o caminho da imagem.")
+			return
+		}
+		execCompress(os.Args[2])
+
+	case "view":
+		if len(os.Args) < 3 {
+			fmt.Println("Erro: informe o arquivo .ys")
+			return
+		}
+		startYourSyncServer(os.Args[2])
+
+	default:
+		fmt.Println("Comando desconhecido.")
+	}
 }
 
-func HuffmanCompress(data []byte, output io.Writer) error {
-	// 1. Contar frequências e criar arvore
-	freqs := make(map[byte]int)
-	for _, b := range data {
-		freqs[b]++
-	}
-	root := BuildTree(freqs)
+func execCompress(inputPath string) {
+	fmt.Printf("--- Your Sync: Comprimindo %s ---\n", inputPath)
 
-	// 2. Gerar codigos
-	codes := make(map[byte]string)
-	GenerateCodes(root, "", codes)
+	ext := strings.ToLower(inputPath)
 
-	// 3. Iniciar o BitWriter
-	bw := NewBitWriter(output)
+	var rawData []byte
+	var width int
+	var dataType uint8
 
-	// 4. Header salvar o tamanho total do arquivo (4 bytes)
-	binary.Write(output, binary.LittleEndian, uint32(len(data)))
-
-	// 5. Header serializar a arvore bit a bit
-	serializeTree(root, bw)
-
-	// 6. Dados grava o corpo do arquivo
-	for _, b := range data {
-		code := codes[b]
-		for _, bitChar := range code {
-			if bitChar == '1' {
-				bw.WriteBit(1)
-			} else {
-				bw.WriteBit(0)
-			}
+	// 1. Identificação de IMAGEM
+	if strings.HasSuffix(ext, ".png") || strings.HasSuffix(ext, ".jpg") || strings.HasSuffix(ext, ".jpeg") {
+		fmt.Printf("--- YourSync: Modo IMAGEM [%s] ---\n", inputPath)
+		file, _ := os.Open(inputPath)
+		defer file.Close()
+		img, _, err := image.Decode(file)
+		if err != nil {
+			fmt.Println("Erro ao decodificar imagem:", err)
+			return
 		}
-	}
+		width = img.Bounds().Dx()
+		rawData = imageToRGBBytes(img)
+		dataType = TYPE_IMG
 
-	return bw.Flush()
-}
-
-func HuffmanDecompress(r io.Reader) ([]byte, error) {
-	// 1. Ler o tamanho total de caracteres (4 bytes)
-	var totalChars uint32
-	if err := binary.Read(r, binary.LittleEndian, &totalChars); err != nil {
-		return nil, err
-	}
-
-	// 2. Iniciar o BitReader
-	br := newBitReader(r)
-
-	// 3. Reconstruir a arvore a partir dos bits do cabeçalho
-	root := deserializeTree(br)
-
-	// 4. Decodificar os dados
-	var result []byte
-	for i := 0; i < int(totalChars); i++ {
-		currentNode := root
-		for currentNode.Left != nil || currentNode.Right != nil {
-			bit, err := br.ReadBit()
-			if err != nil {
-				return nil, err
-			}
-
-			if bit == 0 {
-				currentNode = currentNode.Left
-			} else {
-				currentNode = currentNode.Right
-			}
+		// 2. Identificação de TEXTO (TXT ou CSV)
+	} else if strings.HasSuffix(ext, ".txt") || strings.HasSuffix(ext, ".csv") {
+		fmt.Printf("--- YourSync: Modo TEXTO [%s] ---\n", inputPath)
+		var err error
+		rawData, err = os.ReadFile(inputPath)
+		if err != nil {
+			fmt.Println("Erro ao ler arquivo:", err)
+			return
 		}
-		result = append(result, currentNode.Char)
+		dataType = TYPE_TEXT
+		width = 0
+
+		// 3. Bloqueio de outros formatos
+	} else {
+		fmt.Printf("Erro: O formato '%s' não é suportado.\n", ext)
+		fmt.Println("Formatos aceitos: .png, .jpg, .txt, .csv")
+		return
 	}
 
-	return result, nil
+	// 3. Execução da Compressão com Barra de Progresso
+	var compressedBuffer bytes.Buffer
+
+	// Inicia a compressão
+	err := ViktorCompress(rawData, dataType, width, &compressedBuffer)
+	if err != nil {
+		fmt.Println("Erro na compressão:", err)
+		return
+	}
+
+	// 4. Salva o arquivo .ys
+	outputName := "resultado.ys"
+	os.WriteFile(outputName, compressedBuffer.Bytes(), 0644)
+
+	fmt.Printf("Sucesso! Economia: %.2f%%\n", 100.0-(float64(compressedBuffer.Len())/float64(len(rawData))*100.0))
 }
