@@ -110,6 +110,8 @@ func ViktorCompress(data []byte, dataType uint8, width int, output io.Writer) er
 
 		fmt.Println("Aplicando filtro 2D...")
 		dataToCompress = Apply2DFilterRGB(data, width)
+	} else {
+		binary.Write(output, binary.LittleEndian, uint32(0))
 	}
 
 	return HuffmanCompress(dataToCompress, output)
@@ -152,10 +154,8 @@ func ViktorDecompressAndGetMetadata(r io.Reader) ([]byte, uint8, int, error) {
 	dataType := typeBuf[0]
 
 	var width uint32
-	if dataType == TYPE_IMG {
-		if err := binary.Read(r, binary.LittleEndian, &width); err != nil {
-			return nil, 0, 0, err
-		}
+	if err := binary.Read(r, binary.LittleEndian, &width); err != nil {
+		return nil, 0, 0, err
 	}
 
 	restored, err := HuffmanDecompress(r)
