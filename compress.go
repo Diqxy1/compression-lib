@@ -158,7 +158,7 @@ func ViktorDecompressAndGetMetadata(r io.Reader) ([]byte, uint8, int, error) {
 		}
 	}
 
-	restored, err := HuffmanDecompress(r) // Acha que HuffmanDecompress já inclui LZ77
+	restored, err := HuffmanDecompress(r)
 	if err != nil {
 		return nil, 0, 0, err
 	}

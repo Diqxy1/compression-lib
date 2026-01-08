@@ -116,7 +116,7 @@ func imageToGrayscaleBytes(img image.Image) []byte {
 		for x := range width {
 			r, g, b, _ := img.At(x, y).RGBA()
 			// Fórmula simples de luminância: 0.299R + 0.587G + 0.114B
-			// O RGBA retorna valores de 16 bits, precisamos dividir por 256 ou deslocar 8
+			// O RGBA retorna valores de 16 bits, precisa dividir por 256 ou deslocar 8
 			lum := (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 256.0
 			data[y*width+x] = byte(lum)
 		}
@@ -127,7 +127,7 @@ func imageToGrayscaleBytes(img image.Image) []byte {
 func imageToRGBBytes(img image.Image) []byte {
 	bounds := img.Bounds()
 	width, height := bounds.Dx(), bounds.Dy()
-	// Criamos um slice 3x maior para armazenar R, G e B
+	// cria um slice 3x maior para armazenar R, G e B
 	data := make([]byte, width*height*3)
 
 	i := 0

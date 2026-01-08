@@ -59,10 +59,7 @@ func BuildTree(frequencies map[int]int) *Node {
 			left, right = right, left
 		}
 
-		minSymbol := left.Symbol
-		if right.Symbol < minSymbol {
-			minSymbol = right.Symbol
-		}
+		minSymbol := min(right.Symbol, left.Symbol)
 
 		// Cria um nó pai com a soma das frequências
 		parent := &Node{

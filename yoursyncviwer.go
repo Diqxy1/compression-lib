@@ -18,7 +18,7 @@ func YoursyncToMemory(inputPath string) (image.Image, error) {
 	}
 	defer file.Close()
 
-	// 2. Usa sua função de descompressão existente
+	// 2. Descompressão
 	restored, dataType, width, err := ViktorDecompressAndGetMetadata(file)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,6 @@ func showProgress(current, total int) {
 	}
 }
 
-// Retorna os dados, o tipo, a largura (se imagem) e o erro
 func DecompressToInterface(inputPath string) ([]byte, uint8, int, error) {
 	file, err := os.Open(inputPath)
 	if err != nil {
@@ -63,13 +62,11 @@ func DecompressToInterface(inputPath string) ([]byte, uint8, int, error) {
 	}
 	defer file.Close()
 
-	// Sua função que já lê o Header (TYPE_IMG ou TYPE_TEXT)
 	restored, dataType, width, err := ViktorDecompressAndGetMetadata(file)
 	return restored, dataType, width, err
 }
 
 func startYourSyncServer(ppPath string) {
-	// Rota para a imagem bruta (usada apenas se for TYPE_IMG)
 	http.HandleFunc("/raw", func(w http.ResponseWriter, r *http.Request) {
 		file, _ := os.Open(ppPath)
 		defer file.Close()
@@ -95,12 +92,10 @@ func startYourSyncServer(ppPath string) {
 		fileInfo, _ := os.Stat(ppPath)
 		sizeKB := fileInfo.Size() / 1024
 
-		// Definimos o que aparecerá no corpo do HTML
 		var contentHTML string
 		if dataType == TYPE_IMG {
 			contentHTML = `<img src="/raw" />`
 		} else {
-			// Se for texto, usamos uma tag <pre> para manter a formatação
 			contentHTML = fmt.Sprintf(`
                 <div class="text-container">
                     <pre>%s</pre>
