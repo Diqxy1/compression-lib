@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary" // Desnecesario ?
+	"fmt"
 	"io"
 )
 
@@ -33,16 +34,15 @@ func WriteHeader(w io.Writer, freqs map[byte]int) error {
 // Percorre a árvore e grava 0 para nós e 1+byte para folhas
 func serializeTree(node *Node, bw *BitWriter) {
 	if node.Left == nil && node.Right == nil {
-		bw.WriteBit(1) // É folha
-		// Escreve os 8 bits do caractere
-		for i := 7; i >= 0; i-- {
-			bw.WriteBit(uint8((node.Char >> i) & 1))
-		}
+		bw.WriteBits(1, 1) // Grava o bit '1' indicando que é uma folha
+
+		// Grava os 9 bits do Símbolo de uma só vez
+		bw.WriteBits(uint64(node.Symbol), 9)
 
 		return
 	}
 
-	bw.WriteBit(0) // Nó interno
+	bw.WriteBits(0, 1) // Nó interno
 	serializeTree(node.Left, bw)
 	serializeTree(node.Right, bw)
 }
@@ -81,21 +81,91 @@ func ReadHeader(r io.Reader) (map[byte]int, error) {
 
 // Inverso para o serializer conseguir reconstruir a folha
 func deserializeTree(br *BitReader) *Node {
-	bit, _ := br.ReadBit()
-	if bit == 1 {
-		// É folha, lê os próximos 8 bits para formar o caractere
-		var char uint8
-		for i := 0; i < 8; i++ {
-			b, _ := br.ReadBit()
-			char = (char << 1) | b
-		}
-
-		return &Node{Char: char}
+	// Lê 1 bit para saber se é folha ou nó
+	bit, err := br.ReadBits(1)
+	if err != nil {
+		return nil
 	}
 
-	// É nó interno, cria os filhos
+	if bit == 1 {
+		// Se for folha, lê os 9 bits do símbolo de uma vez
+		symbol, _ := br.ReadBits(9)
+		return &Node{Symbol: int(symbol)}
+	}
+
+	// Se for nó interno (bit 0), reconstrói os filhos
 	return &Node{
 		Left:  deserializeTree(br),
 		Right: deserializeTree(br),
 	}
+}
+
+func ViktorCompress(data []byte, dataType uint8, width int, output io.Writer) error {
+	output.Write([]byte{dataType})
+
+	dataToCompress := data
+
+	if dataType == TYPE_IMG {
+		binary.Write(output, binary.LittleEndian, uint32(width))
+
+		fmt.Println("Aplicando filtro 2D...")
+		dataToCompress = Apply2DFilterRGB(data, width)
+	}
+
+	return HuffmanCompress(dataToCompress, output)
+}
+
+func ViktorDecompress(r io.Reader) ([]byte, error) {
+	typeBuf := make([]byte, 1)
+	if _, err := r.Read(typeBuf); err != nil {
+		return nil, err
+	}
+
+	dataType := typeBuf[0]
+
+	var width uint32
+
+	if dataType == TYPE_IMG {
+		if err := binary.Read(r, binary.LittleEndian, &width); err != nil {
+			return nil, err
+		}
+	}
+
+	restored, err := HuffmanDecompress(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if dataType == TYPE_IMG {
+		fmt.Println("Removendo Filtro 2D...")
+		restored = Remove2DFilterRGB(restored, int(width))
+	}
+
+	return restored, nil
+}
+
+func ViktorDecompressAndGetMetadata(r io.Reader) ([]byte, uint8, int, error) {
+	typeBuf := make([]byte, 1)
+	if _, err := r.Read(typeBuf); err != nil {
+		return nil, 0, 0, err
+	}
+	dataType := typeBuf[0]
+
+	var width uint32
+	if dataType == TYPE_IMG {
+		if err := binary.Read(r, binary.LittleEndian, &width); err != nil {
+			return nil, 0, 0, err
+		}
+	}
+
+	restored, err := HuffmanDecompress(r) // Acha que HuffmanDecompress já inclui LZ77
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	if dataType == TYPE_IMG {
+		restored = Remove2DFilterRGB(restored, int(width))
+	}
+
+	return restored, dataType, int(width), nil
 }
