@@ -67,21 +67,38 @@ func DecompressToInterface(inputPath string) ([]byte, uint8, int, error) {
 }
 
 func startYourSyncServer(ppPath string) {
+	// Rota para servir a imagem bruta (usada pela tag <img>)
 	http.HandleFunc("/raw", func(w http.ResponseWriter, r *http.Request) {
-		file, _ := os.Open(ppPath)
-		defer file.Close()
-		restored, dataType, width, _ := ViktorDecompressAndGetMetadata(file)
-
-		if dataType == TYPE_IMG {
-			img := buildImageObject(restored, width)
-			w.Header().Set("Content-Type", "image/png")
-			png.Encode(w, img)
+		file, err := os.Open(ppPath)
+		if err != nil {
+			return
 		}
+		defer file.Close()
+
+		// IMPORTANTE: ViktorDecompressAndGetMetadata deve ler o byte de tipo
+		// e os 4 bytes de largura antes do Huffman para não desalinharem.
+		restored, dataType, width, err := ViktorDecompressAndGetMetadata(file)
+		if err != nil || dataType != TYPE_IMG {
+			return
+		}
+
+		img := buildImageObject(restored, width)
+		w.Header().Set("Content-Type", "image/png")
+		png.Encode(w, img)
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		restoredData, dataType, _, err := DecompressToInterface(ppPath)
+
+		// Abre o arquivo para descompressão
+		file, err := os.Open(ppPath)
+		if err != nil {
+			fmt.Fprintf(w, "Erro ao abrir arquivo: %v", err)
+			return
+		}
+		defer file.Close()
+
+		restoredData, dataType, _, err := ViktorDecompressAndGetMetadata(file)
 		duration := time.Since(start)
 
 		if err != nil {
@@ -96,6 +113,7 @@ func startYourSyncServer(ppPath string) {
 		if dataType == TYPE_IMG {
 			contentHTML = `<img src="/raw" />`
 		} else {
+			// Tratamento para exibir texto/CSV com segurança
 			contentHTML = fmt.Sprintf(`
                 <div class="text-container">
                     <pre>%s</pre>
@@ -111,8 +129,24 @@ func startYourSyncServer(ppPath string) {
                         .stats { background: #1e1e1e; padding: 25px; border-radius: 15px; border: 1px solid #333; display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
                         .highlight { color: #00ff88; font-weight: bold; }
                         img { margin-top: 30px; border: 2px solid #00ff88; border-radius: 8px; max-width: 95%%; box-shadow: 0 0 20px rgba(0,255,136,0.2); }
-                        .text-container { margin-top: 30px; background: #000; padding: 20px; text-align: left; display: inline-block; border-radius: 8px; border: 1px solid #444; max-width: 90%%; overflow-x: auto; }
-                        pre { color: #00ff88; font-family: 'Consolas', monospace; margin: 0; }
+                        .text-container { 
+                            margin-top: 30px; 
+                            background: #000; 
+                            padding: 20px; 
+                            text-align: left; 
+                            display: inline-block; 
+                            border-radius: 8px; 
+                            border: 1px solid #444; 
+                            max-width: 90%%; 
+                            overflow-x: auto; 
+                        }
+                        pre { 
+                            color: #00ff88; 
+                            font-family: 'Consolas', 'Monaco', monospace; 
+                            margin: 0; 
+                            white-space: pre-wrap; /* Faz o texto quebrar linha se for muito longo */
+                            word-wrap: break-word;
+                        }
                     </style>
                 </head>
                 <body>
