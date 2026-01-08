@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"runtime"
+	"sync"
 )
 
 func Apply2DFilter(data []byte, width int) []byte {
@@ -37,24 +39,43 @@ func Apply2DFilter(data []byte, width int) []byte {
 
 func Apply2DFilterRGB(data []byte, width int) []byte {
 	rowSize := width * 3
+	height := len(data) / rowSize
 	filtered := make([]byte, len(data))
 
-	for i := range data {
-		var left, up byte
+	// paralelismo para maior perfomance
+	numCPU := runtime.NumCPU()
+	var wg sync.WaitGroup
+	chunkSize := height / numCPU
 
-		// Vizinho da esquerda (3 bytes atrás, mesma cor)
-		if i%rowSize >= 3 {
-			left = data[i-3]
+	for i := range numCPU {
+		wg.Add(1)
+		sY := i * chunkSize
+		eY := (i + 1) * chunkSize
+		if i == numCPU-1 {
+			eY = height
 		}
 
-		// Vizinho de cima (uma linha inteira atrás, mesma cor)
-		if i >= rowSize {
-			up = data[i-rowSize]
-		}
+		go func(startY, endY int) {
+			defer wg.Done()
+			for y := startY; y < endY; y++ {
+				for x := range rowSize {
+					idx := y*rowSize + x
+					var left, up byte
+					if x >= 3 {
+						left = data[idx-3]
+					}
+					if y > 0 {
+						up = data[idx-rowSize]
+					}
 
-		prediction := byte((int(left) + int(up)) / 2)
-		filtered[i] = data[i] - prediction
+					prediction := byte((int(left) + int(up)) / 2)
+					filtered[idx] = data[idx] - prediction
+				}
+			}
+		}(sY, eY)
 	}
+
+	wg.Wait()
 	return filtered
 }
 
@@ -130,17 +151,34 @@ func imageToRGBBytes(img image.Image) []byte {
 	// cria um slice 3x maior para armazenar R, G e B
 	data := make([]byte, width*height*3)
 
-	i := 0
-	for y := range height {
-		for x := range width {
-			r, g, b, _ := img.At(x, y).RGBA()
-			// Convertendo de 16-bit para 8-bit (0-255)
-			data[i] = byte(r >> 8)
-			data[i+1] = byte(g >> 8)
-			data[i+2] = byte(b >> 8)
-			i += 3
+	// paralelismo para maior perfomance
+	numCPU := runtime.NumCPU()
+	var wg sync.WaitGroup
+	chunkSize := height / numCPU
+
+	for i := 0; i < numCPU; i++ {
+		wg.Add(1)
+		startY := i * chunkSize
+		endY := (i + 1) * chunkSize
+		if i == numCPU-1 {
+			endY = height
 		}
+
+		go func(sY, eY int) {
+			defer wg.Done()
+			for y := sY; y < eY; y++ {
+				for x := range width {
+					r, g, b, _ := img.At(x, y).RGBA()
+					pos := (y*width + x) * 3
+					data[pos] = byte(r >> 8)
+					data[pos+1] = byte(g >> 8)
+					data[pos+2] = byte(b >> 8)
+				}
+			}
+		}(startY, endY)
 	}
+
+	wg.Wait()
 	return data
 }
 
@@ -152,8 +190,8 @@ func saveBytesAsPNGRGB(data []byte, width int, filename string) error {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
 	idx := 0
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
+	for y := range height {
+		for x := range width {
 			img.Set(x, y, color.RGBA{
 				R: data[idx],
 				G: data[idx+1],
