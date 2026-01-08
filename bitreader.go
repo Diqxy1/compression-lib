@@ -1,37 +1,38 @@
 package main
 
 import (
+	"bufio"
 	"io"
 )
 
 type BitReader struct {
-	reader io.Reader
-	// Armazena o byte atual que estamos processando
-	byte byte
-	// Quantos bits ainda restam para ler no byte atual
-	bitsIn uint8
+	reader *bufio.Reader
+	cache  uint64 // Acumulador de bits
+	bits   uint8  // Quantos bits úteis ainda restam no cache
 }
 
 func newBitReader(r io.Reader) *BitReader {
-	return &BitReader{reader: r}
+	return &BitReader{
+		reader: bufio.NewReader(r),
+	}
 }
 
 // Lê o próximo bit (retorna 0 ou 1)
-func (br *BitReader) ReadBit() (uint8, error) {
-	if br.bitsIn == 0 {
-		// Se não há mais bits no buffer, lê o próximo byte do arquivo
-		buf := make([]byte, 1)
-		_, err := br.reader.Read(buf)
+func (br *BitReader) ReadBits(nbits uint8) (uint64, error) {
+	for br.bits < nbits {
+		nextByte, err := br.reader.ReadByte()
 		if err != nil {
 			return 0, err
 		}
-
-		br.byte = buf[0]
-		br.bitsIn = 8
+		br.cache = (br.cache << 8) | uint64(nextByte)
+		br.bits += 8
 	}
 
-	// Extrai o bit mais significativo (da esquerda)
-	bit := (br.byte >> (br.bitsIn - 1)) & 1
-	br.bitsIn--
-	return bit, nil
+	shift := br.bits - nbits
+	val := (br.cache >> shift) & ((1 << nbits) - 1)
+
+	br.bits -= nbits
+	br.cache &= (1 << br.bits) - 1
+
+	return val, nil
 }
