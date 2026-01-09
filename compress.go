@@ -37,7 +37,7 @@ func serializeTree(node *Node, bw *BitWriter) {
 		bw.WriteBits(1, 1) // Grava o bit '1' indicando que é uma folha
 
 		// Grava os 9 bits do Símbolo de uma só vez
-		bw.WriteBits(uint64(node.Symbol), 9)
+		bw.WriteBits(uint64(node.Symbol&0x3FF), 10)
 
 		return
 	}
@@ -89,14 +89,15 @@ func deserializeTree(br *BitReader) *Node {
 
 	if bit == 1 {
 		// Se for folha, lê os 9 bits do símbolo de uma vez
-		symbol, _ := br.ReadBits(9)
+		symbol, _ := br.ReadBits(10)
 		return &Node{Symbol: int(symbol)}
 	}
 
 	// Se for nó interno (bit 0), reconstrói os filhos
 	return &Node{
-		Left:  deserializeTree(br),
-		Right: deserializeTree(br),
+		Symbol: -1,
+		Left:   deserializeTree(br),
+		Right:  deserializeTree(br),
 	}
 }
 
@@ -110,11 +111,13 @@ func ViktorCompress(data []byte, dataType uint8, width int, output io.Writer) er
 
 		fmt.Println("Aplicando filtro 2D...")
 		dataToCompress = Apply2DFilterRGB(data, width)
+		return HuffmanCompress(dataToCompress, output, true)
 	} else {
 		binary.Write(output, binary.LittleEndian, uint32(0))
+		return HuffmanCompress(dataToCompress, output, false)
 	}
 
-	return HuffmanCompress(dataToCompress, output)
+	//return HuffmanCompress(dataToCompress, output)
 }
 
 func ViktorDecompress(r io.Reader) ([]byte, error) {
