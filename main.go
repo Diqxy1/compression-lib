@@ -41,9 +41,46 @@ func main() {
 		}
 		startYourSyncServer(os.Args[2])
 
+	case "decompress": // Novo caso
+		if len(os.Args) < 3 {
+			fmt.Println("Erro: informe o arquivo .ys para extração.")
+			return
+		}
+		execDecompress(os.Args[2])
+
 	default:
 		fmt.Println("Comando desconhecido.")
 	}
+}
+
+func execDecompress(inputPath string) {
+	fmt.Printf("--- Your Sync: Extraindo %s ---\n", inputPath)
+
+	file, err := os.Open(inputPath)
+	if err != nil {
+		fmt.Println("Erro ao abrir:", err)
+		return
+	}
+	defer file.Close()
+
+	// 1. Descomprime usando seu motor Huffman + LZ77
+	restored, dataType, width, err := ViktorDecompressAndGetMetadata(file)
+	if err != nil {
+		fmt.Println("Erro na descompressão:", err)
+		return
+	}
+
+	// 2. Define o nome base (ex: resultado.ys -> extraido)
+	baseName := "extraido_" + strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+
+	// 3. Reconstrói o arquivo original
+	err = ReconstructFile(restored, dataType, width, baseName)
+	if err != nil {
+		fmt.Println("Erro ao reconstruir arquivo:", err)
+		return
+	}
+
+	fmt.Printf("Sucesso! Arquivo reconstruído como %s\n", baseName)
 }
 
 func execCompress(inputPath string) {
