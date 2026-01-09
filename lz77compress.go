@@ -6,58 +6,158 @@ type LZ77Symbol struct {
 	ExtraVal  int // O valor dos bits extras
 }
 
-func LZ77Compress(data []byte) []LZ77Symbol {
+func LZ77Compress(data []byte, isImage bool) []LZ77Symbol {
+	const (
+		windowSize = 65536
+		windowMask = windowSize - 1
+		hashSize   = 1 << 15
+		hashMask   = hashSize - 1
+		maxMatch   = 258
+		//minMatch   = 6
+		hShift = 6
+	)
+
+	minMatch := 6
+	if !isImage {
+		minMatch = 3
+	}
+
+	inputSize := len(data)
+	if inputSize < 3 {
+		return emitLiterals(data)
+	}
+
+	paddedData := make([]byte, inputSize+4)
+	copy(paddedData, data)
+
 	var symbols []LZ77Symbol
+	symbols = make([]LZ77Symbol, 0, inputSize/2)
 
-	// Configurações da Janela LZ77
-	windowSize := 32768 // Tamanho máximo da janela de busca (padrão DEFLATE)
-	minMatch := 3       // Mínimo para considerar um match
-	maxMatch := 258     // Máximo para o comprimento do match (padrão DEFLATE)
+	head := make([]int, hashSize)
+	for i := range head {
+		head[i] = -1
+	}
+	prev := make([]int, windowSize)
 
-	for i := 0; i < len(data); {
-		matchDist := 0
+	// Inicializa o hash com os dois primeiros bytes
+	h := (uint32(paddedData[0]) << hShift) ^ uint32(paddedData[1])
+
+	for i := 0; i < inputSize; {
 		matchLen := 0
+		matchDist := 0
 
-		// Procura o maior match no "Search Buffer"
-		searchBufferStart := i - windowSize
-		if searchBufferStart < 0 {
-			searchBufferStart = 0
-		}
+		// TRAVA DE SEGURANÇA 1: Só calcula hash se houver o 3º byte disponível
+		if i+2 < inputSize {
+			h = ((uint32(paddedData[i]) << (hShift * 2)) ^
+				(uint32(paddedData[i+1]) << hShift) ^
+				uint32(paddedData[i+2])) & hashMask
 
-		for j := searchBufferStart; j < i; j++ { //necesita de melhoreia (HASH TABLE)
-			currMatchLen := 0
-			for currMatchLen < maxMatch && // Não exceder o maxMatch
-				i+currMatchLen < len(data) && // Não sair do Look-ahead
-				data[j+currMatchLen] == data[i+currMatchLen] { // Caracteres iguais
-				currMatchLen++
+			pos := head[h]
+			prev[i&windowMask] = pos
+			head[h] = i
+
+			maxPossible := inputSize - i
+			if maxPossible > maxMatch {
+				maxPossible = maxMatch
 			}
 
-			// O match deve ser de pelo menos minMatch
-			if currMatchLen > matchLen {
-				matchLen = currMatchLen
-				matchDist = i - j
+			chainLen := 32768
+			for pos != -1 && i-pos <= windowSize && chainLen > 0 {
+				// TRAVA DE SEGURANÇA 2: pos+matchLen deve estar dentro dos limites
+				if paddedData[pos+matchLen] == paddedData[i+matchLen] && paddedData[pos] == paddedData[i] {
+					currLen := 0
+					for currLen < maxPossible && paddedData[pos+currLen] == paddedData[i+currLen] {
+						currLen++
+					}
+
+					if currLen > matchLen {
+						matchLen = currLen
+						matchDist = i - pos
+						if currLen >= maxMatch {
+							break
+						}
+					}
+				}
+				pos = prev[pos&windowMask]
+				chainLen--
 			}
 		}
 
 		if matchLen >= minMatch {
-			c, eb, ev := GetLengthData(matchLen)
-			symbols = append(symbols, LZ77Symbol{Code: c, ExtraBits: eb, ExtraVal: ev})
+			currentLen := matchLen
+			currentDist := matchDist
 
-			dc, deb, dev := GetDistanceData(matchDist)
+			nextDist := 0
+
+			// Espiada no próximo byte (i+1)
+			nextLen := 0
+			iNext := i + 1
+			if iNext+2 < inputSize {
+				// Cálculo rápido do hash para a próxima posição
+				hNext := ((uint32(paddedData[iNext]) << 10) ^ (uint32(paddedData[iNext+1]) << 5) ^ uint32(paddedData[iNext+2])) & hashMask
+				posNext := head[hNext]
+
+				// Busca curta: só queremos saber se existe algo MAIOR que o match atual
+				chainNext := 32
+				for posNext != -1 && iNext-posNext <= windowSize && chainNext > 0 {
+					// Otimização: só verificamos se o byte que superaria o match atual coincide
+					if paddedData[posNext+currentLen] == paddedData[iNext+currentLen] {
+						cL := 0
+						for cL < maxMatch && iNext+cL < inputSize && paddedData[posNext+cL] == paddedData[iNext+cL] {
+							cL++
+						}
+						if cL > nextLen {
+							nextLen = cL
+							nextDist = iNext - posNext
+							if cL >= maxMatch {
+								break
+							}
+						}
+					}
+					posNext = prev[posNext&windowMask]
+					chainNext--
+				}
+			}
+
+			// DECISÃO: Se o próximo match for estritamente melhor, adiamos o atual
+			if nextLen > currentLen || (nextLen == currentLen && nextDist < currentDist/2) {
+				symbols = append(symbols, LZ77Symbol{Code: int(paddedData[i])})
+				i++
+				continue
+			}
+
+			// Caso contrário, emite o match atual (que é o melhor)
+			c, eb, ev := GetLengthData(currentLen)
+			symbols = append(symbols, LZ77Symbol{Code: c, ExtraBits: eb, ExtraVal: ev})
+			dc, deb, dev := GetDistanceData(currentDist)
 			symbols = append(symbols, LZ77Symbol{Code: dc, ExtraBits: deb, ExtraVal: dev})
-			i += matchLen
+
+			// Atualiza o dicionário para os bytes consumidos
+			for j := 1; j < currentLen; j++ {
+				currIdx := i + j
+				if currIdx+2 < inputSize {
+					h = ((h << hShift) ^ uint32(paddedData[currIdx+2])) & hashMask
+					prev[currIdx&windowMask] = head[h]
+					head[h] = currIdx
+				}
+			}
+			i += currentLen
 		} else {
-			// não tem bits extras
-			symbols = append(symbols, LZ77Symbol{
-				Code:      int(data[i]),
-				ExtraBits: 0,
-				ExtraVal:  0,
-			})
+			// Literal (Match menor que minMatch)
+			symbols = append(symbols, LZ77Symbol{Code: int(paddedData[i])})
 			i++
 		}
 	}
-	symbols = append(symbols, LZ77Symbol{Code: 256, ExtraBits: 0, ExtraVal: 0}) // Símbolo de "Fim de Bloco" para Huffman
-	return symbols
+	// EOF Symbol
+	return append(symbols, LZ77Symbol{Code: 256})
+}
+
+func emitLiterals(data []byte) []LZ77Symbol {
+	symbols := make([]LZ77Symbol, 0, len(data)+1)
+	for _, b := range data {
+		symbols = append(symbols, LZ77Symbol{Code: int(b)})
+	}
+	return append(symbols, LZ77Symbol{Code: 256})
 }
 
 // Retorna o código Huffman base e os bits extras necessários
@@ -164,6 +264,12 @@ func GetDistanceData(distance int) (code int, extraBits int, extraVal int) {
 		code = 28 + ((distance - 16385) / 8192)
 		return OFFSET + code, 13, (distance - 16385) % 8192
 
+	case distance >= 32769 && distance <= 49152:
+		return OFFSET + 30, 14, distance - 32769
+
+	case distance >= 49153 && distance <= 65536:
+		return OFFSET + 31, 14, distance - 49153
+
 	default:
 		// Se cair aqui, precisa implementar os casos intermediários (bits 6 a 12)
 		// A lógica é sempre: divide por 2^bits e pega o resto
@@ -196,6 +302,7 @@ func GetLengthBase(code int) (base int, extraBits int) {
 	case c == 28: // 285
 		return 258, 0
 	}
+
 	return 0, 0
 }
 
@@ -245,6 +352,12 @@ func GetDistanceBase(code int) (base int, extraBits int) {
 
 	case c >= 28 && c <= 29:
 		return 16385 + (c-28)*8192, 13
+
+	case c == 30:
+		return 32769, 14
+
+	case c == 31:
+		return 49153, 14
 	}
 
 	return 0, 0
