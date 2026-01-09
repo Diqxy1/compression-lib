@@ -237,3 +237,26 @@ func buildImageObject(data []byte, width int) image.Image {
 
 	return img
 }
+
+func ReconstructFile(data []byte, dataType uint8, width int, outputPath string) error {
+	if dataType == 1 {
+		height := len(data) / (width * 3)
+		img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+		for i := 0; i < len(data); i += 3 {
+			idx := i / 3
+			y := idx / width
+			x := idx % width
+			img.Set(x, y, color.RGBA{data[i], data[i+1], data[i+2], 255})
+		}
+
+		f, err := os.Create(outputPath + ".png")
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return png.Encode(f, img)
+	} else {
+		return os.WriteFile(outputPath+".txt", data, 0644)
+	}
+}
