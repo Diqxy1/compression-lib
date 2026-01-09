@@ -36,3 +36,13 @@ func (br *BitReader) ReadBits(nbits uint8) (uint64, error) {
 
 	return val, nil
 }
+
+func (br *BitReader) ByteAlign() {
+	// 1. Jogamos fora os bits que sobraram no cache
+	// Se br.bits era 3, significa que restavam 3 bits de um byte lido.
+	// Ao zerar isso, o próximo ReadBits será forçado a ler um byte novo do arquivo.
+	br.bits = 0
+
+	// 2. Limpamos o acumulador
+	br.cache = 0
+}
